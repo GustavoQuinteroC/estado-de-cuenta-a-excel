@@ -1,0 +1,2 @@
+pypdf==7.0.0
+xlsxwriter==3.3.1

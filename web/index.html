@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://gustavoquintero.dev; connect-src 'self' https://cdn.jsdelivr.net; base-uri 'self'; form-action 'none'">
+<title>Estado de cuenta a Excel | Gustavo Quintero</title>
+<meta name="description" content="Convierte el PDF de tu estado de cuenta bancario en un Excel con fecha, concepto, cargo, abono y saldo. Corre en tu navegador con Python: el PDF no sale de tu equipo.">
+<meta name="theme-color" content="#081236">
+<link rel="icon" href="icono.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="preload" href="js/trabajador.js" as="script" crossorigin>
+<style>
+  :root {
+    --fondo: #eef3ff; --superficie: #f8faff; --tinta: #0b1a4a; --tinta-2: #44527a; --linea: #d0daf2;
+    --noche: #081236; --noche-2: #0f1f57; --hielo: #eaf0ff; --hielo-2: #a9b8e6; --rey: #2350ff; --rey-hover: #1636c7; --esmeralda: #00c389;
+    --obra: #8a4a06; --obra-suave: #fdecd3; --rojo: #b42318; --rojo-suave: #fde4e1;
+    --fuente: "Geist", "Segoe UI", system-ui, -apple-system, sans-serif; --mono: "Geist Mono", ui-monospace, Menlo, monospace; --ancho: 1180px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --fondo: #060d29; --superficie: #0c1640; --tinta: #eaf0ff; --tinta-2: #a9b8e6; --linea: #1d2c66; --rey: #5b7cff; --rey-hover: #7f99ff; --obra: #f6b25c; --obra-suave: #3a2a12; --rojo: #ff9a9a; --rojo-suave: #3d1717; }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--fondo); color: var(--tinta); font-family: var(--fuente); line-height: 1.55; }
+  a { color: inherit; }
+  [hidden] { display: none !important; }
+  :focus-visible { outline: 3px solid var(--rey); outline-offset: 2px; border-radius: 6px; }
+  .ancho { width: min(100% - 32px, var(--ancho)); margin-inline: auto; }
+  .cabecera { background-color: var(--noche); background-image: radial-gradient(rgba(169,184,230,.16) 1px, transparent 1px); background-size: 22px 22px; color: var(--hielo); padding: 24px 0 56px; }
+  .barra { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .firma { display: inline-flex; align-items: center; gap: 12px; text-decoration: none; font-weight: 600; white-space: nowrap; }
+  .firma__foto { width: 38px; height: 38px; border-radius: 12px; object-fit: cover; box-shadow: 0 0 0 2px var(--rey); }
+  .barra__enlaces { display: flex; gap: 22px; font-size: .95rem; }
+  .barra__enlaces a { color: var(--hielo-2); text-decoration: none; }
+  .barra__enlaces a:hover { color: #fff; }
+  .portada { margin-top: 44px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px; align-items: center; }
+  .portada > * { min-width: 0; }
+  h1 { font-size: clamp(2.2rem, 5vw, 3.6rem); line-height: 1.04; letter-spacing: -.04em; font-weight: 700; }
+  .portada p { margin-top: 14px; font-size: 1.12rem; color: var(--hielo-2); max-width: 54ch; }
+  .garantia { margin-top: 20px; display: flex; gap: 10px; align-items: flex-start; font-size: .95rem; color: var(--hielo); }
+  .garantia svg { flex: none; margin-top: 2px; }
+
+  /* La zona de carga imita la hoja de un estado de cuenta: el documento que la persona trae. */
+  .zona { position: relative; background: var(--hielo); color: #0b1a4a; border-radius: 22px; padding: 26px; border: 2px dashed transparent; display: grid; gap: 14px; box-shadow: 0 30px 60px -40px rgba(0,0,0,.6); }
+  .zona[data-encima] { border-color: var(--esmeralda); }
+  .zona__hoja { font-family: var(--mono); font-size: .78rem; color: #44527a; display: grid; gap: 6px; }
+  .zona__hoja span { display: flex; justify-content: space-between; border-bottom: 1px dashed #b8c4e6; padding-bottom: 4px; }
+  .zona h2 { font-size: 1.25rem; letter-spacing: -.02em; }
+  .zona p { color: #44527a; font-size: .95rem; }
+  .acciones { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .boton { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 12px; padding: 11px 18px; font: 600 .98rem var(--fuente); text-decoration: none; cursor: pointer; border: 1px solid transparent; }
+  .boton--primario { background: #2350ff; color: #fff; }
+  .boton--primario:hover { background: #1636c7; }
+  .boton--secundario { border-color: #b8c4e6; color: #0b1a4a; background: transparent; }
+  .boton--secundario:hover { border-color: #2350ff; }
+  .boton:disabled { opacity: .5; cursor: progress; }
+  .archivo { position: relative; overflow: hidden; }
+  .archivo input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .archivo:focus-within { outline: 3px solid #2350ff; outline-offset: 2px; }
+  .nombre-archivo { font-family: var(--mono); font-size: .85rem; color: #44527a; overflow-wrap: anywhere; }
+  .campo label { display: block; font-size: .88rem; color: #44527a; margin-bottom: 6px; }
+  .campo div { display: flex; gap: 8px; }
+  .campo input { flex: 1; min-width: 0; font: inherit; padding: 10px 12px; border-radius: 12px; border: 1px solid #b8c4e6; background: #fff; color: #0b1a4a; }
+  .estado { font-size: .92rem; color: #44527a; min-height: 1.4em; }
+  .estado[data-tipo="error"] { color: #b42318; }
+  .estado[data-tipo="listo"] { color: #00805b; }
+
+  main { padding: 36px 0 64px; display: grid; gap: 22px; }
+  .tarjeta { background: var(--superficie); border: 1px solid var(--linea); border-radius: 22px; padding: 24px; min-width: 0; }
+  .tarjeta h2 { font-size: 1.15rem; letter-spacing: -.015em; }
+  .tarjeta p, .tarjeta li { color: var(--tinta-2); font-size: .95rem; }
+  .resumen { display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: center; justify-content: space-between; }
+  .cifras { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+  .cifras dt { font-size: .82rem; color: var(--tinta-2); }
+  .cifras dd { font: 600 1.15rem var(--mono); overflow-wrap: anywhere; }
+  .cuadre { font-size: .9rem; font-weight: 600; padding: 6px 12px; border-radius: 999px; background: var(--obra-suave); color: var(--obra); }
+  .cuadre[data-cuadra="true"] { background: rgba(0,195,137,.16); color: #00805b; }
+  .cuadre[data-cuadra="false"] { background: var(--rojo-suave); color: var(--rojo); }
+  @media (prefers-color-scheme: dark) { .cuadre[data-cuadra="true"] { color: #5fe0b4; } }
+  .avisos { margin-top: 14px; padding-left: 1.1em; display: grid; gap: 4px; }
+  .avisos li { color: var(--obra); }
+  .descargas { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+  .descargas .boton--secundario { color: var(--tinta); border-color: var(--linea); }
+  .tabla { margin-top: 18px; overflow-x: auto; border: 1px solid var(--linea); border-radius: 14px; max-height: 560px; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--linea); white-space: nowrap; }
+  th { position: sticky; top: 0; background: var(--superficie); font-size: .8rem; color: var(--tinta-2); font-weight: 600; }
+  td.concepto { white-space: normal; min-width: 240px; }
+  td.num, th.num { text-align: right; font-family: var(--mono); }
+  tr.revisar td { background: var(--obra-suave); }
+  .explica { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; }
+  .explica p { margin-top: 8px; }
+  .pie { border-top: 1px solid var(--linea); padding: 22px 0 28px; font-size: .92rem; color: var(--tinta-2); }
+  .pie .ancho { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
+  @media (max-width: 900px) { .portada, .explica { grid-template-columns: minmax(0, 1fr); } .cifras { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 560px) { .zona, .tarjeta { padding: 18px; } .barra__enlaces { gap: 14px; font-size: .9rem; } }
+  @media (max-width: 420px) { .solo-ancho { display: none; } .barra__enlaces { gap: 12px; font-size: .86rem; } .firma { gap: 9px; } }
+</style>
+</head>
+<body>
+  <header class="cabecera">
+    <div class="ancho">
+      <nav class="barra" aria-label="Principal">
+        <a class="firma" href="https://gustavoquintero.dev"><img class="firma__foto" src="https://gustavoquintero.dev/assets/img/gustavo-quintero-96.jpg" width="38" height="38" alt="">Gustavo Quintero</a>
+        <div class="barra__enlaces">
+          <a href="../">Herramientas</a>
+          <a class="solo-ancho" href="https://gustavoquintero.dev">CV</a>
+          <a href="https://github.com/GustavoQuinteroC/estado-de-cuenta-a-excel" rel="noopener">Código</a>
+        </div>
+      </nav>
+      <div class="portada">
+        <div>
+          <h1>Estado de cuenta a Excel</h1>
+          <p>Sube el PDF de tu banco y obtén un Excel con fecha, concepto, cargo, abono y saldo de cada movimiento, listo para conciliar o filtrar.</p>
+          <p class="garantia"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#00c389" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="m9 12 2 2 4-4"/></svg><span>El PDF no sale de tu equipo. Python corre dentro de tu navegador; cuando termina de cargar puedes desconectarte de internet y sigue funcionando.</span></p>
+        </div>
+        <section class="zona" id="zona" aria-labelledby="titulo-zona">
+          <div class="zona__hoja" aria-hidden="true">
+            <span><b>05/OCT  SPEI RECIBIDO</b><b>+15,600.00</b></span>
+            <span><b>07/OCT  COMISION</b><b>−250.00</b></span>
+          </div>
+          <h2 id="titulo-zona">Arrastra aquí tu estado de cuenta</h2>
+          <p>Funciona con PDF digitales que traen columnas de cargos y abonos, o un importe y el saldo. No funciona con PDF escaneados como foto.</p>
+          <div class="acciones">
+            <label class="boton boton--primario archivo">Elegir PDF<input id="archivo" type="file" accept="application/pdf,.pdf"></label>
+            <button class="boton boton--secundario" id="ejemplo" type="button">Probar con un ejemplo</button>
+          </div>
+          <div class="nombre-archivo" id="nombre-archivo"></div>
+          <div class="campo" id="campo-contrasena" hidden>
+            <label for="contrasena">Contraseña del PDF</label>
+            <div><input id="contrasena" type="password" autocomplete="off"><button class="boton boton--primario" id="convertir" type="button">Abrir</button></div>
+          </div>
+          <p class="estado" id="estado" role="status" aria-live="polite"></p>
+        </section>
+      </div>
+    </div>
+  </header>
+
+  <main class="ancho">
+    <section class="tarjeta" id="resultado" aria-labelledby="titulo-resultado" hidden>
+      <div class="resumen">
+        <div>
+          <h2 id="titulo-resultado">Movimientos</h2>
+          <p id="periodo"></p>
+        </div>
+        <span class="cuadre" id="cuadre"></span>
+      </div>
+      <dl class="cifras" id="cifras"></dl>
+      <ul class="avisos" id="avisos"></ul>
+      <div class="descargas">
+        <a class="boton boton--primario" id="descargar-excel">Descargar Excel</a>
+        <a class="boton boton--secundario" id="descargar-csv">Descargar CSV</a>
+      </div>
+      <div class="tabla">
+        <table>
+          <thead><tr><th>Fecha</th><th>Concepto</th><th class="num">Cargo</th><th class="num">Abono</th><th class="num">Saldo</th></tr></thead>
+          <tbody id="filas"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="explica">
+      <section class="tarjeta">
+        <h2>Cómo sabe si es cargo o abono</h2>
+        <p>Primero por la columna en la que está impreso el importe. Si el banco usa una sola columna, por el saldo: si subió es abono, si bajó es cargo. Solo cuando no hay ninguna de las dos usa las palabras del concepto y te marca el renglón para revisarlo.</p>
+      </section>
+      <section class="tarjeta">
+        <h2>Comprueba que no falte nada</h2>
+        <p>Suma abonos y resta cargos al saldo inicial. Si el resultado es el saldo final del PDF, ves "Cuadra". Si no, te dice por cuánto y en qué renglones el saldo impreso no coincide.</p>
+      </section>
+      <section class="tarjeta">
+        <h2>Un Excel que se puede usar</h2>
+        <p>Las fechas son fechas y los importes son números, no texto. La hoja trae filtros, totales que se recalculan al filtrar y una hoja de resumen con el saldo calculado.</p>
+      </section>
+    </div>
+  </main>
+
+  <footer class="pie">
+    <div class="ancho">
+      <span>Gustavo Quintero · Guadalajara</span>
+      <a href="https://github.com/GustavoQuinteroC/estado-de-cuenta-a-excel" rel="noopener">Código abierto con licencia MIT</a>
+    </div>
+  </footer>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
